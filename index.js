@@ -4,7 +4,7 @@ import chalk from "chalk";
 import dotenv from "dotenv";
 import dayjs from "dayjs";
 import { MongoClient } from "mongodb";
-import joi from 'joi';
+import joi from "joi";
 
 dotenv.config();
 const app = express();
@@ -19,52 +19,52 @@ let database = null;
 const mongoclient = new MongoClient(process.env.MONGO_URL);
 
 app.post("/participants", async (req, res) => {
-	const participantSchema = joi.object({
-		name: joi.string().required(),
-	  });
+  const participantSchema = joi.object({
+    name: joi.string().required(),
+  });
   const validation = participantSchema.validate(req.body);
   if (validation.error) {
     res.status(422).send("Preencha os campos corretamente.");
   }
-    try {
-      await mongoclient.connect();
-      database = mongoclient.db(process.env.DATABASE);
-      console.log(chalk.bold.green("Connected to database"));
+  try {
+    await mongoclient.connect();
+    database = mongoclient.db(process.env.DATABASE);
+    console.log(chalk.bold.green("Connected to database"));
 
-      const { name } = req.body;
+    const { name } = req.body;
 
-      await database
-        .collection("participants")
-        .findOne({
-          name: req.body.name,
-        })
-        .then((participant) => {
-          if (participant) {
-            res.status(409).send("Nome de usuário em uso. Escolha outro!");
-            return;
-          }
-        });
+    await database
+      .collection("participants")
+      .findOne({
+        name: req.body.name,
+      })
+      .then((participant) => {
+        if (participant) {
+          res.status(409).send("Nome de usuário em uso. Escolha outro!");
+          return;
+        }
+      });
 
-      const participant = await database
-        .collection("participants")
-        .insertOne({ name, lastStatus: Date.now() });
-      res.sendStatus(201);
-      const userMessage = database
-        .collection("messages")
-        .insertOne({
-          from: { name },
-          to: "Todos",
-          text: "entra na sala...",
-          type: "status",
-          time: dayjs().format("HH:mm:ss"),
-        })
-        res.sendStatus(201);
-    } catch (err) {
-      res.status(500).send("erro");
-    } finally {
-      mongoclient.close();
-      console.log(chalk.bold.red("Disconnected to database."));
-    }
+    const participant = await database
+      .collection("participants")
+      .insertOne({ name, lastStatus: Date.now() });
+    res.sendStatus(201);
+    const participantMessage = database
+	.collection("messages")
+	.insertOne({
+      from: { name },
+      to: "Todos",
+      text: "entra na sala...",
+      type: "status",
+      time: dayjs().format("HH:mm:ss"),
+    });
+    res.sendStatus(201);
+  } catch (err) {
+    res.status(500).send("erro");
+  } finally {
+    mongoclient.close();
+    console.log(chalk.bold.red("Disconnected to database."));
+  }
 });
 
 app.get("/participants", async (req, res) => {
@@ -86,32 +86,32 @@ app.get("/participants", async (req, res) => {
   }
 });
 
-app.post("/messages", async (req,res) => {
-	const messageSchema = joi.object({
-		to: joi.string().required(),
-		text: joi.string().required(),
-		type: joi.string().valid("message", "private_message").required(),
-		from: joi.string().required()
-	});
-    const {to,text,type} = req.body;    
-    const {user: from} = req.headers;
-    const validation = messageSchema.validate(req.body)
+app.post("/messages", async (req, res) => {
+  const messageSchema = joi.object({
+    to: joi.string().required(),
+    text: joi.string().required(),
+    type: joi.string().valid("message", "private_message").required(),
+    from: joi.string().required(),
+  });
+  const { to, text, type } = req.body;
+  const { user: from } = req.headers;
+  const validation = messageSchema.validate(req.body);
 
-    if(validation.error){
-        res.sendStatus(422)
-		return
-    }
-	try {
+  if (validation.error) {
+    res.sendStatus(422);
+    return;
+  }
+  try {
     await mongoclient.connect();
     database = mongoclient.db(process.env.DATABASE);
     console.log(chalk.bold.green("Connected to database"));
 
-    const users = await database
-	.collection("participants")
-	.find()
-	.toArray();
-    const usersArr = users.find((user) => user.name === from);
-    if (!usersArr) {
+    const participant = await database
+      .collection("participants")
+      .find()
+      .toArray();
+    const participantsArr = users.find((user) => user.name === from);
+    if (!participantsArr) {
       res.sendStatus(422);
       return;
     }
@@ -132,7 +132,7 @@ app.post("/messages", async (req,res) => {
     mongoclient.close();
     console.log(chalk.bold.red("Disconnected to database."));
   }
-})
+});
 
 app.get("/messages", async (req, res) => {
   const { user } = req.headers;
@@ -146,7 +146,7 @@ app.get("/messages", async (req, res) => {
 	.collection("messages")
 	.find({})
 	.toArray();
-    const userMessages = [];
+    const participantMessages = [];
     for (let i = 0; i < messages.length; i++) {
       if (
         messages[i].to === user ||
@@ -154,13 +154,13 @@ app.get("/messages", async (req, res) => {
         messages[i].type === "status" ||
         messages[i].from === user
       ) {
-        userMessages.push(messages[i]);
+        participantMessages.push(messages[i]);
       }
     }
     if (!limit) {
       limit = messages.length;
     }
-    res.send(userMessages.splice(0, parseInt(limit)));
+    res.send(participantMessages.splice(0, parseInt(limit)));
   } catch (err) {
     res.status(500).send("erro");
   } finally {
@@ -168,3 +168,73 @@ app.get("/messages", async (req, res) => {
     console.log(chalk.bold.red("Disconnected to database."));
   }
 });
+
+app.post("/status", async (req, res) => {
+  const { user } = req.headers;
+  try {
+    await mongoclient.connect();
+    database = mongoclient.db(process.env.DATABASE);
+    console.log(chalk.bold.green("Connected to database"));
+
+    const findUser = await database
+      .collection("participants")
+      .findOne({ name: user });
+    if (!findUser) {
+      res.sendStatus(404);
+      return;
+    }
+    const updateTime = await database
+      .collection("participants")
+      .updateOne({ name: user }, { $set: { lastStatus: Date.now() } });
+    res.send(200);
+  } catch (err) {
+    res.status(500).send("erro");
+  } finally {
+    mongoclient.close();
+    console.log(chalk.bold.red("Disconnected to database."));
+  }
+});
+setInterval(async () => {
+  try {
+    await mongoclient.connect();
+    database = mongoclient.db(process.env.DATABASE);
+    console.log(chalk.bold.green("Connected to database"));
+
+    const participant = await database
+      .collection("participants")
+      .find({})
+      .toArray();
+    mongoclient.close();
+    participant.forEach(async (user) => {
+      let now = Date.now();
+      let time = now - user.lastStatus;
+      if (time > 15000) {
+        try {
+          await mongoclient.connect();
+          database = mongoclient.db(process.env.DATABASE);
+          console.log(chalk.bold.green("Connected to database"));
+
+		  await database
+		  .collection("participants")
+		  .deleteOne({_id:user._id})
+          await database
+		  .collection("messages")
+		  .insertOne({
+            from: user.name,
+            to: "Todos",
+            text: "sai da sala...",
+            type: "status",
+            time: dayjs().format("HH:MM:ss"),
+          });
+        } catch (e) {
+          mongoclient.close();
+        }
+      }
+    });
+  } catch (err) {
+    res.status(500).send("erro");
+  } finally {
+    mongoclient.close();
+    console.log(chalk.bold.red("Disconnected to database."));
+  }
+}, 15000);
