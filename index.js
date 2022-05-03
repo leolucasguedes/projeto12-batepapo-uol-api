@@ -19,39 +19,34 @@ let database = null;
 const mongoclient = new MongoClient(process.env.MONGO_URL);
 
 app.post("/participants", async (req, res) => {
+  const { name } = req.body;
   const participantSchema = joi.object({
     name: joi.string().required(),
+    lastStatus: joi.number(),
   });
   const validation = participantSchema.validate(req.body);
   if (validation.error) {
     res.status(422).send("Preencha os campos corretamente.");
+    return;
   }
   try {
     await mongoclient.connect();
     database = mongoclient.db(process.env.DATABASE);
     console.log(chalk.bold.green("Connected to database"));
 
-    const { name } = req.body;
+    const userCreated = await database
+      .collection("participants")
+      .findOne({ name });
+    if (userCreated) {
+      res.status(409).send("Nome de usuário em uso. Escolha outro!");
+      return;
+    }
 
     await database
       .collection("participants")
-      .findOne({
-        name: req.body.name,
-      })
-      .then((participant) => {
-        if (participant) {
-          res.status(409).send("Nome de usuário em uso. Escolha outro!");
-          return;
-        }
-      });
-
-    const participant = await database
-      .collection("participants")
       .insertOne({ name, lastStatus: Date.now() });
     res.sendStatus(201);
-    const participantMessage = database
-	.collection("messages")
-	.insertOne({
+    await database.collection("messages").insertOne({
       from: { name },
       to: "Todos",
       text: "entra na sala...",
@@ -93,10 +88,10 @@ app.post("/messages", async (req, res) => {
     type: joi.string().valid("message", "private_message").required(),
     from: joi.string().required(),
   });
+  const from = req.headers.user;
   const { to, text, type } = req.body;
-  const { user: from } = req.headers;
-  const validation = messageSchema.validate(req.body);
 
+  const validation = messageSchema.validate(req.body);
   if (validation.error) {
     res.sendStatus(422);
     return;
@@ -108,17 +103,14 @@ app.post("/messages", async (req, res) => {
 
     const participant = await database
       .collection("participants")
-      .find()
+      .find({ name: from })
       .toArray();
-    const participantsArr = users.find((user) => user.name === from);
-    if (!participantsArr) {
+    if (participant.length === 0) {
       res.sendStatus(422);
+      mongoclient.close();
       return;
     }
-
-    await database
-	.collection("messages")
-	.insertOne({
+    await messages.collection("messages").insertOne({
       to,
       text,
       type,
@@ -142,10 +134,7 @@ app.get("/messages", async (req, res) => {
     database = mongoclient.db(process.env.DATABASE);
     console.log(chalk.bold.green("Connected to database"));
 
-    const messages = await database
-	.collection("messages")
-	.find({})
-	.toArray();
+    const messages = await database.collection("messages").find({}).toArray();
     const participantMessages = [];
     for (let i = 0; i < messages.length; i++) {
       if (
@@ -214,12 +203,10 @@ setInterval(async () => {
           database = mongoclient.db(process.env.DATABASE);
           console.log(chalk.bold.green("Connected to database"));
 
-		  await database
-		  .collection("participants")
-		  .deleteOne({_id:user._id})
           await database
-		  .collection("messages")
-		  .insertOne({
+            .collection("participants")
+            .deleteOne({ _id: user._id });
+          await database.collection("messages").insertOne({
             from: user.name,
             to: "Todos",
             text: "sai da sala...",
@@ -238,3 +225,31 @@ setInterval(async () => {
     console.log(chalk.bold.red("Disconnected to database."));
   }
 }, 15000);
+
+app.delete("/messages/:MessageId", async (req, res) => {
+  const { user } = req.headers;
+  const { MessageId } = req.params;
+  try {
+    await mongoclient.connect();
+    database = mongoclient.db(process.env.DATABASE);
+    console.log(chalk.bold.green("Connected to database"));
+
+    const participant = await database
+      .collection("messages")
+      .findOne({ _id: new ObjectId(MessageId) });
+    //console.log(MessageId);
+    //console.log(user);
+    if (participant.from === user) {
+      await database
+        .collection("messages")
+        .deleteOne({ _id: new ObjectId(MessageId) });
+      res.sendStatus(200);
+    } else {
+      res.sendStatus(401);
+    }
+  } catch (err) {
+    console.log(err);
+    res.sendStatus(404);
+    mongoclient.close();
+  }
+});
